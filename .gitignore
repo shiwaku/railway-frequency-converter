@@ -1,0 +1,8 @@
+# ダウンロード元データ・中間ファイル・成果物はリポジトリに含めない
+data/raw/
+data/normalized/
+dist/
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,37 @@
+{
+  "base_url": "https://gtfs-gis.jp/railway_honsu/data",
+  "file_prefix": "unkohonsu",
+  "years": [2023, 2024, 2025, 2026],
+  "datasets": [
+    {
+      "name": "rosen_kukan",
+      "geometry": "line",
+      "description": "路線別・区間別運行本数",
+      "tippecanoe": ["-Z4", "-z13", "--drop-densest-as-needed", "--extend-zooms-if-still-dropping"]
+    },
+    {
+      "name": "kukan",
+      "geometry": "line",
+      "description": "区間別運行本数",
+      "tippecanoe": ["-Z4", "-z13", "--drop-densest-as-needed", "--extend-zooms-if-still-dropping"]
+    },
+    {
+      "name": "rosen_eki",
+      "geometry": "point",
+      "description": "路線別・駅別発着本数",
+      "tippecanoe": ["-Z4", "-z13", "-r1"]
+    },
+    {
+      "name": "eki",
+      "geometry": "point",
+      "description": "事業者別・駅別発着本数",
+      "tippecanoe": ["-Z4", "-z13", "-r1"]
+    },
+    {
+      "name": "kukan_eki",
+      "geometry": "point",
+      "description": "区間端の駅",
+      "tippecanoe": ["-Z4", "-z13", "-r1"]
+    }
+  ]
+}

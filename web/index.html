@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>鉄道運行本数 マップ</title>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="tooltip" class="map-tooltip" hidden></div>
+
+  <section id="panel" class="panel" aria-label="コントロールパネル">
+    <header class="panel-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🚆</span>
+        <h1>鉄道運行本数</h1>
+      </div>
+      <div class="head-actions">
+        <button id="theme-btn" class="icon-btn" type="button" title="テーマ切替" aria-label="テーマ切替"></button>
+        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉"></button>
+      </div>
+    </header>
+
+    <div id="panel-body" class="panel-body">
+      <div class="field">
+        <label class="field-label" for="year">年次</label>
+        <div class="seg" id="year-seg" role="tablist" aria-label="年次選択"></div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">レイヤー</span>
+        <div id="layers" class="toggles"></div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">凡例</span>
+        <div id="legend" class="legend"></div>
+      </div>
+
+      <footer class="panel-foot">
+        データ: 鉄道運行本数 CC-BY 4.0 / ODbL（gtfs-gis.jp）<br />
+        背景: 国土地理院 最適化ベクトルタイル
+      </footer>
+    </div>
+  </section>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+name: build-pmtiles
+
+# 鉄道運行本数データをダウンロード → 正規化 → PMTiles 生成する。
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "既存の中間ファイル/成果物を無視して再生成する"
+        type: boolean
+        default: false
+      publish_release:
+        description: "生成した PMTiles を GitHub Releases に公開する"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "config/**"
+      - "scripts/**"
+      - "Makefile"
+      - ".github/workflows/build-pmtiles.yml"
+  schedule:
+    # 毎月 1 日 00:00 UTC に元データの更新を取り込む
+    - cron: "0 0 1 * *"
+
+permissions:
+  contents: write # Releases 公開に必要
+
+concurrency:
+  group: build-pmtiles
+  cancel-in-progress: true
+
+env:
+  TIPPECANOE_VERSION: "2.80.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # tippecanoe は apt に無いのでソースからビルド（バージョン単位でキャッシュ）
+      - name: Cache tippecanoe
+        id: cache-tippecanoe
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/tippecanoe
+          key: tippecanoe-${{ env.TIPPECANOE_VERSION }}-${{ runner.os }}
+
+      - name: Build tippecanoe
+        if: steps.cache-tippecanoe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch "${TIPPECANOE_VERSION}" https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          sudo make -C /tmp/tippecanoe install
+          tippecanoe --version
+
+      - name: Download → Normalize → Build
+        run: |
+          FORCE=""
+          if [ "${{ inputs.force }}" = "true" ]; then FORCE="--force"; fi
+          python3 scripts/download.py $FORCE
+          python3 scripts/normalize.py $FORCE
+          python3 scripts/build.py $FORCE
+
+      - name: Summary
+        run: |
+          {
+            echo "## PMTiles 生成結果";
+            echo "";
+            echo "| ファイル | サイズ |";
+            echo "|---|---:|";
+            for f in dist/*.pmtiles; do
+              sz=$(awk "BEGIN{printf \"%.2f MB\", $(stat -c%s "$f")/1048576}")
+              echo "| \`$(basename "$f")\` | $sz |";
+            done
+            total=$(du -ck dist/*.pmtiles | tail -1 | awk '{printf "%.2f MB", $1/1024}')
+            echo "";
+            echo "**合計: $total**";
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: railway-honsu-pmtiles
+          path: dist/*.pmtiles
+          retention-days: 30
+          compression-level: 0 # PMTiles は既に圧縮済み
+
+      # 手動実行で publish_release=true のときだけ Releases に公開
+      - name: Publish to GitHub Releases
+        if: inputs.publish_release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pmtiles-latest
+          name: "Railway Honsu PMTiles (latest)"
+          files: dist/*.pmtiles
+          body: |
+            全国鉄道運行本数 PMTiles（自動生成）
+            元データ: https://gtfs-gis.jp/railway_honsu/ (CC-BY 4.0 / ODbL)
