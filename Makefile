@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: all download normalize build clean clean-dist manifest
+.PHONY: all download normalize build clean clean-dist manifest deploy-pages
 
 all: build manifest
 
@@ -18,6 +18,10 @@ manifest:
 	@echo "=== dist/ PMTiles ==="
 	@ls -l dist/*.pmtiles 2>/dev/null | awk '{printf "%-38s %8.2f MB\n", $$9, $$5/1048576}' || true
 	@du -ck dist/*.pmtiles 2>/dev/null | tail -1 | awk '{printf "TOTAL: %.2f MB\n", $$1/1024}' || true
+
+# ビューア + PMTiles を GitHub Pages (gh-pages ブランチ) へデプロイ
+deploy-pages:
+	bash scripts/deploy-pages.sh
 
 # 中間ファイルと成果物を削除
 clean:

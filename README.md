@@ -75,6 +75,8 @@ make clean      # 中間ファイル・成果物を削除
 生成した PMTiles を確認・デモ表示するための **Vite + TypeScript** アプリ。
 背景は国土地理院の最適化ベクトルタイル（淡色地図）で、ダーク/ライト切替に対応する。
 
+**公開デモ:** https://shiwaku.github.io/railway-honsu-converter/
+
 ```bash
 cd viewer
 npm install
@@ -85,6 +87,7 @@ npm run preview   # ビルド結果の確認
 
 - 開発サーバーはリポジトリ直下 `dist/` の PMTiles を `/pmtiles` から **Range(206) 対応**で配信する（`vite.config.ts` のミドルウェア）。先に `make build` で PMTiles を生成しておくこと。
 - 本番配信では PMTiles を置いた URL を `viewer/.env` の `VITE_PMTILES_BASE` に指定する（未設定時は `/pmtiles`）。
+- **GitHub Pages へのデプロイ:** `make deploy-pages` でビューアをビルドし、`dist/` の PMTiles を同梱して `gh-pages` ブランチへ force push する（履歴は保持しない）。PMTiles を更新したら再実行する。
 - 5 データセットをトグルで重畳表示。線は運行本数（`honsu_total`）、点は発着本数で色分け（実分布に合わせた単一色相の連続ランプ）。
 
 ## GitHub Actions
