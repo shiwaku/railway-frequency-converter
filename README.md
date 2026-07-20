@@ -75,7 +75,7 @@ make clean      # 中間ファイル・成果物を削除
 生成した PMTiles を確認・デモ表示するための **Vite + TypeScript** アプリ。
 背景は国土地理院の最適化ベクトルタイル（淡色地図）で、ダーク/ライト切替に対応する。
 
-**公開デモ:** https://shiwaku.github.io/railway-honsu-converter/
+**公開デモ:** https://shiwaku.github.io/railway-frequency-converter/
 
 ```bash
 cd viewer

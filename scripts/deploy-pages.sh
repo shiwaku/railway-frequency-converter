@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ビューアをビルドし、PMTiles を同梱して gh-pages ブランチへデプロイする。
-# 公開 URL: https://shiwaku.github.io/railway-honsu-converter/
+# 公開 URL: https://shiwaku.github.io/railway-frequency-converter/
 # 前提: make build 済みで dist/*.pmtiles が存在すること。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # GitHub Pages のサブパス（リポジトリ名）
-PAGES_BASE="/railway-honsu-converter"
+PAGES_BASE="/railway-frequency-converter"
 
 ls dist/*.pmtiles >/dev/null 2>&1 || {
   echo "ERROR: dist/*.pmtiles がない。先に make build を実行すること。" >&2
