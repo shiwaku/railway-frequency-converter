@@ -216,13 +216,18 @@ map.on('mouseout', () => {
 })
 
 // ---- クリックポップアップ ----
+// 単一インスタンスを使い回す。毎回 new すると前のポップアップが残り複数表示になる。
+const popup = new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
 map.on('click', (e) => {
   const ids = activeLayerIds()
   const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
-  if (!feats.length) return
+  if (!feats.length) {
+    popup.remove()
+    return
+  }
   const f = feats[0]
   const key = keyFromLayer(f.layer.id)
-  new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
+  popup
     .setLngLat(e.lngLat)
     .setHTML(popupHtml(key, f.properties as Record<string, unknown>))
     .addTo(map)
