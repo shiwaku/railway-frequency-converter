@@ -18,6 +18,11 @@ const PMTILES_BASE = import.meta.env.VITE_PMTILES_BASE ?? '/pmtiles'
 const DATA_ATTRIBUTION =
   '鉄道運行本数 CC-BY 4.0 / ODbL（<a href="https://gtfs-gis.jp/railway_honsu/" target="_blank" rel="noopener">gtfs-gis.jp</a>）'
 const YEARS = ['2023', '2024', '2025', '2026']
+const PANEL_KEY = 'railway-honsu-panel-collapsed'
+/** ホバーが無い端末（タッチ）ではツールチップを出さず、タップのポップアップに一本化する。 */
+const CAN_HOVER = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true
+/** クリック/ホバーの判定に使う許容半径（px）。細い線と小さい点を掴みやすくする。 */
+const HIT_PAD = CAN_HOVER ? 5 : 10
 
 let theme: Theme = initialTheme()
 let year = '2026'
@@ -40,8 +45,34 @@ map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribut
 
 const layerId = (key: string): string => `${key}-lyr`
 const keyFromLayer = (id: string): string => id.replace(/-lyr$/, '')
+const defOf = (key: string): LayerDef | undefined => LAYERS.find((l) => l.key === key)
 const activeLayerIds = (): string[] =>
   LAYERS.filter((l) => l.on).map((l) => layerId(l.key)).filter((id) => map.getLayer(id))
+const sourceUrl = (key: string): string => `pmtiles://${PMTILES_BASE}/unkohonsu${year}_${key}.pmtiles`
+
+// ---- ローディング表示 ----
+const loadingEl = document.getElementById('loading') as HTMLElement
+let loadingToken = 0
+/**
+ * 'idle' は再読込が始まる前のフレームでも発火しうるので、それだけを待つと
+ * スピナーが一瞬で消える。最低待ち時間 + areTilesLoaded() で判定する。
+ */
+function beginLoading(): void {
+  const token = ++loadingToken
+  const started = performance.now()
+  loadingEl.hidden = false
+  const timer = window.setInterval(() => {
+    if (token !== loadingToken) {
+      window.clearInterval(timer)
+      return
+    }
+    const elapsed = performance.now() - started
+    if ((elapsed > 300 && map.areTilesLoaded()) || elapsed > 20000) {
+      window.clearInterval(timer)
+      loadingEl.hidden = true
+    }
+  }, 120)
+}
 
 function addDataLayers(): void {
   for (const def of LAYERS) {
@@ -51,7 +82,10 @@ function addDataLayers(): void {
   for (const def of LAYERS) {
     map.addSource(def.key, {
       type: 'vector',
-      url: `pmtiles://${PMTILES_BASE}/unkohonsu${year}_${def.key}.pmtiles`,
+      url: sourceUrl(def.key),
+      // tippecanoe はフィーチャ ID を振らないので、feature-state 用に
+      // 一意プロパティ（ID）を昇格させる。持たないデータセットは省略。
+      ...(def.idProp ? { promoteId: { [def.key]: def.idProp } } : {}),
     })
     const p = paintFor(def, theme)
     map.addLayer({
@@ -63,20 +97,29 @@ function addDataLayers(): void {
       paint: p.paint,
     } as maplibregl.LayerSpecification)
   }
+  beginLoading()
 }
 
-function onceStyleReady(cb: () => void): void {
-  if (map.isStyleLoaded()) {
-    cb()
-    return
-  }
-  const h = (): void => {
-    if (map.isStyleLoaded()) {
-      map.off('styledata', h)
-      cb()
+/**
+ * 年次切替はソースの URL だけ差し替える。
+ * レイヤーごと作り直すと一瞬すべて消えて画面がちらつくため。
+ * setUrl を持たない実装にあたった場合だけ従来どおり作り直す。
+ */
+function updateYearSources(): void {
+  clearHover()
+  closePopup()
+  let rebuilt = false
+  for (const def of LAYERS) {
+    const src = map.getSource(def.key) as (maplibregl.VectorTileSource & { setUrl?: (u: string) => void }) | undefined
+    if (src && typeof src.setUrl === 'function') {
+      src.setUrl(sourceUrl(def.key))
+    } else {
+      rebuilt = true
+      break
     }
   }
-  map.on('styledata', h)
+  if (rebuilt) addDataLayers()
+  else beginLoading()
 }
 
 // ---- テーマ ----
@@ -88,8 +131,15 @@ function setTheme(next: Theme): void {
   theme = next
   applyThemeAttr(theme)
   renderThemeBtn()
-  map.setStyle(getBasemapStyle(theme))
-  onceStyleReady(() => {
+  clearHover()
+  // テーマ切替でデータレイヤーが消える問題への対処:
+  //   - setStyle の既定（diff:true）は差分適用で、スタイルに無いデータレイヤーは削除される。
+  //     しかも新しい Style を作らないので 'style.load' が発火せず、再追加の起点が取れない。
+  //   - setStyle 直後の isStyleLoaded() は差し替え前のスタイルに対して true を返すため、
+  //     それを見て再追加すると「消える前のスタイル」に足してしまう。
+  // → diff:false で作り直し、'style.load' を待ってから再追加する。
+  map.setStyle(getBasemapStyle(theme), { diff: false })
+  map.once('style.load', () => {
     addDataLayers()
     renderLegend()
     renderToggleDots()
@@ -97,14 +147,22 @@ function setTheme(next: Theme): void {
 }
 themeBtn.addEventListener('click', () => setTheme(theme === 'dark' ? 'light' : 'dark'))
 
-// ---- パネル開閉 ----
+// ---- パネル開閉（状態を保存。モバイルは初期折りたたみ） ----
 const panel = document.getElementById('panel') as HTMLElement
 const collapseBtn = document.getElementById('collapse-btn') as HTMLButtonElement
 function renderCollapseBtn(): void {
-  collapseBtn.textContent = panel.classList.contains('collapsed') ? '▾' : '▴'
+  const collapsed = panel.classList.contains('collapsed')
+  collapseBtn.textContent = collapsed ? '▾' : '▴'
+  collapseBtn.setAttribute('aria-expanded', String(!collapsed))
+}
+function initCollapsed(): void {
+  const saved = localStorage.getItem(PANEL_KEY)
+  const collapsed = saved === null ? window.innerWidth <= 640 : saved === '1'
+  panel.classList.toggle('collapsed', collapsed)
 }
 collapseBtn.addEventListener('click', () => {
-  panel.classList.toggle('collapsed')
+  const collapsed = panel.classList.toggle('collapsed')
+  localStorage.setItem(PANEL_KEY, collapsed ? '1' : '0')
   renderCollapseBtn()
 })
 
@@ -121,47 +179,90 @@ function buildYearSeg(): void {
       if (y === year) return
       year = y
       for (const el of yearSeg.children) el.setAttribute('aria-selected', String(el === b))
-      addDataLayers()
+      updateYearSources()
     })
     yearSeg.append(b)
   }
 }
 
-// ---- レイヤートグル ----
+// ---- レイヤートグル（線＝排他ラジオ / 点＝チェックボックス） ----
 const layersDiv = document.getElementById('layers') as HTMLElement
 const dotFor = (def: LayerDef): string => {
-  if (def.key === 'kukan_eki') return theme === 'dark' ? '#9aa0a6' : '#5f6368'
+  if (!def.valueMax && def.geom === 'point') return theme === 'dark' ? '#9aa0a6' : '#5f6368'
   const { colors } = rampColors(def.geom, theme)
   return colors[colors.length - 2]
 }
-function buildToggles(): void {
-  for (const def of LAYERS) {
-    const label = document.createElement('label')
-    label.className = 'toggle'
-    label.dataset.key = def.key
 
-    const input = document.createElement('input')
-    input.type = 'checkbox'
-    input.checked = def.on
-    input.addEventListener('change', () => {
-      def.on = input.checked
-      const id = layerId(def.key)
-      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', def.on ? 'visible' : 'none')
-    })
+function setLayerVisible(def: LayerDef, on: boolean): void {
+  def.on = on
+  const id = layerId(def.key)
+  if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none')
+  if (!on && hovered?.source === def.key) clearHover()
+}
 
-    const sw = document.createElement('span')
-    sw.className = 'switch'
-    const text = document.createElement('span')
-    text.className = 't-label'
-    text.textContent = def.label
+function toggleRow(def: LayerDef | null, kind: 'radio' | 'checkbox', name?: string): HTMLLabelElement {
+  const label = document.createElement('label')
+  label.className = 'toggle'
+  if (def) label.dataset.key = def.key
+
+  const input = document.createElement('input')
+  input.type = kind
+  if (name) input.name = name
+  input.checked = def ? def.on : LAYERS.filter((l) => l.exclusive === 'line').every((l) => !l.on)
+
+  const mark = document.createElement('span')
+  mark.className = kind === 'radio' ? 'radio' : 'switch'
+  const text = document.createElement('span')
+  text.className = 't-label'
+  text.textContent = def ? def.label : '非表示'
+
+  label.append(input, mark, text)
+  if (def) {
     const dot = document.createElement('span')
     dot.className = 't-dot'
     dot.style.background = dotFor(def)
-
-    label.append(input, sw, text, dot)
-    layersDiv.append(label)
+    label.append(dot)
   }
+
+  input.addEventListener('change', () => {
+    if (kind === 'radio') {
+      // 排他グループ: 選ばれた 1 つだけを表示する
+      for (const l of LAYERS) {
+        if (l.exclusive === 'line') setLayerVisible(l, l === def)
+      }
+    } else if (def) {
+      setLayerVisible(def, input.checked)
+    }
+    renderLegend()
+  })
+  return label
 }
+
+function buildToggles(): void {
+  const group = (title: string, hint: string, rows: HTMLElement[]): HTMLElement => {
+    const wrap = document.createElement('div')
+    wrap.className = 'tg-group'
+    const head = document.createElement('div')
+    head.className = 'tg-head'
+    head.innerHTML = `${title}<span class="tg-hint">${hint}</span>`
+    const list = document.createElement('div')
+    list.className = 'toggles'
+    list.append(...rows)
+    wrap.append(head, list)
+    return wrap
+  }
+
+  // 線: rosen_kukan と kukan は同じ線形に重なって描かれ、混ぜても読めないので排他にする
+  const lineRows = LAYERS.filter((l) => l.exclusive === 'line').map((l) => toggleRow(l, 'radio', 'line-layer'))
+  lineRows.push(toggleRow(null, 'radio', 'line-layer'))
+  const pointRows = LAYERS.filter((l) => l.geom === 'point').map((l) => toggleRow(l, 'checkbox'))
+
+  layersDiv.append(
+    group('線', '区間の運行本数（排他）', lineRows),
+    group('点', '駅の発着本数', pointRows),
+  )
+}
+
 function renderToggleDots(): void {
   for (const def of LAYERS) {
     const dot = layersDiv.querySelector<HTMLElement>(`.toggle[data-key="${def.key}"] .t-dot`)
@@ -169,9 +270,9 @@ function renderToggleDots(): void {
   }
 }
 
-// ---- 凡例 ----
+// ---- 凡例（表示中のレイヤーに連動） ----
 const legendDiv = document.getElementById('legend') as HTMLElement
-function legendBlock(title: string, geom: 'line' | 'point'): string {
+function legendBlock(title: string, geom: 'line' | 'point', note: string): string {
   const { stops, colors } = rampColors(geom, theme)
   const max = stops[stops.length - 1]
   const gradient = colors
@@ -185,56 +286,194 @@ function legendBlock(title: string, geom: 'line' | 'point'): string {
     `<div class="legend-title">${title}</div>` +
     `<div class="legend-bar" style="background:linear-gradient(90deg,${gradient})"></div>` +
     `<div class="legend-ticks">${ticks}</div>` +
+    `<div class="legend-note">${note}</div>` +
     `</div>`
   )
 }
 function renderLegend(): void {
+  const blocks: string[] = []
+  if (LAYERS.some((l) => l.on && l.geom === 'line')) {
+    blocks.push(legendBlock('線：運行本数（合計・本/日）', 'line', '色と太さの両方が本数に連動'))
+  }
+  if (LAYERS.some((l) => l.on && l.geom === 'point' && l.valueMax)) {
+    blocks.push(legendBlock('点：発着本数（本/日）', 'point', '円の面積が本数に比例'))
+  }
+  if (defOf('kukan_eki')?.on) {
+    const c = theme === 'dark' ? '#9aa0a6' : '#5f6368'
+    blocks.push(
+      `<div class="legend-block"><div class="legend-title">点：区間端の駅</div>` +
+        `<div class="legend-note"><span class="legend-dot" style="background:${c}"></span>本数データを持たない位置のみの点</div></div>`,
+    )
+  }
   legendDiv.innerHTML =
-    legendBlock('線：運行本数（合計）', 'line') + legendBlock('点：発着本数', 'point')
+    blocks.join('') || `<div class="legend-note">表示中のデータレイヤーがありません</div>`
 }
 
-// ---- ホバーツールチップ ----
-const tooltip = document.getElementById('tooltip') as HTMLElement
-map.on('mousemove', (e) => {
-  const ids = activeLayerIds()
-  const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
-  if (feats.length) {
-    const f = feats[0]
-    const key = keyFromLayer(f.layer.id)
-    tooltip.innerHTML = hoverHtml(key, f.properties as Record<string, unknown>)
-    tooltip.style.left = `${e.point.x}px`
-    tooltip.style.top = `${e.point.y}px`
-    tooltip.hidden = false
-    map.getCanvas().style.cursor = 'pointer'
-  } else {
-    tooltip.hidden = true
-    map.getCanvas().style.cursor = ''
-  }
-})
-map.on('mouseout', () => {
-  tooltip.hidden = true
-})
+// ---- フィーチャ取得（クリック/ホバー共通） ----
+type Feat = maplibregl.MapGeoJSONFeature
 
-// ---- クリックポップアップ ----
-// 単一インスタンスを使い回す。毎回 new すると前のポップアップが残り複数表示になる。
-const popup = new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
-map.on('click', (e) => {
+/** 同じフィーチャがタイル境界で重複して返ることがあるので畳む。 */
+function dedupe(feats: Feat[]): Feat[] {
+  const seen = new Set<string>()
+  return feats.filter((f) => {
+    const key = `${f.layer.id}:${f.id ?? JSON.stringify(f.properties)}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function queryAt(pt: maplibregl.Point): Feat[] {
   const ids = activeLayerIds()
-  const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
-  if (!feats.length) {
-    popup.remove()
+  if (!ids.length) return []
+  // 細い線・小さい点を掴めるようにカーソル周辺の矩形で問い合わせる
+  const box: [maplibregl.PointLike, maplibregl.PointLike] = [
+    [pt.x - HIT_PAD, pt.y - HIT_PAD],
+    [pt.x + HIT_PAD, pt.y + HIT_PAD],
+  ]
+  return dedupe(map.queryRenderedFeatures(box, { layers: ids }))
+}
+
+// ---- ホバーハイライト（feature-state） ----
+let hovered: { source: string; sourceLayer: string; id: string | number } | null = null
+
+function clearHover(): void {
+  if (hovered && map.getSource(hovered.source)) map.setFeatureState(hovered, { hover: false })
+  hovered = null
+}
+
+function setHover(f: Feat | null): void {
+  const key = f ? keyFromLayer(f.layer.id) : null
+  // ID を持たないデータセット（kukan_eki）は feature-state を張れない
+  const id = f && defOf(key as string)?.idProp ? f.id : undefined
+  if (id === undefined || id === null || key === null) {
+    clearHover()
     return
   }
-  const f = feats[0]
+  if (hovered && hovered.source === key && hovered.id === id) return
+  clearHover()
+  hovered = { source: key, sourceLayer: key, id }
+  map.setFeatureState(hovered, { hover: true })
+}
+
+// ---- ホバーツールチップ（rAF で間引き、画面端で折り返す） ----
+const tooltip = document.getElementById('tooltip') as HTMLElement
+let pendingPoint: maplibregl.Point | null = null
+let rafId = 0
+
+function placeTooltip(pt: maplibregl.Point): void {
+  const canvas = map.getCanvas()
+  const w = canvas.clientWidth
+  const h = canvas.clientHeight
+  const box = tooltip.getBoundingClientRect()
+  const halfW = box.width / 2
+  // 左右: 画面内に収める。上下: 上に入らなければカーソル下に出す。
+  const x = Math.min(Math.max(pt.x, halfW + 8), Math.max(halfW + 8, w - halfW - 8))
+  const below = pt.y - box.height - 16 < 0
+  tooltip.classList.toggle('below', below)
+  const y = below ? Math.min(pt.y, h - box.height - 20) : pt.y
+  tooltip.style.left = `${x}px`
+  tooltip.style.top = `${y}px`
+}
+
+function hideTooltip(): void {
+  tooltip.hidden = true
+  tooltip.classList.remove('below')
+}
+
+function flushHover(): void {
+  rafId = 0
+  const pt = pendingPoint
+  pendingPoint = null
+  if (!pt) return
+  const feats = queryAt(pt)
+  if (feats.length) {
+    const f = feats[0]
+    setHover(f)
+    map.getCanvas().style.cursor = 'pointer'
+    tooltip.innerHTML = hoverHtml(keyFromLayer(f.layer.id), f.properties as Record<string, unknown>)
+    tooltip.hidden = false
+    placeTooltip(pt)
+  } else {
+    setHover(null)
+    hideTooltip()
+    map.getCanvas().style.cursor = ''
+  }
+}
+
+if (CAN_HOVER) {
+  map.on('mousemove', (e) => {
+    // mousemove ごとに queryRenderedFeatures すると重いので 1 フレーム 1 回に間引く
+    pendingPoint = e.point
+    if (!rafId) rafId = requestAnimationFrame(flushHover)
+  })
+  map.on('mouseout', () => {
+    pendingPoint = null
+    setHover(null)
+    hideTooltip()
+  })
+  map.on('dragstart', hideTooltip)
+}
+
+// ---- クリックポップアップ（重なったフィーチャを切り替えられる） ----
+// 単一インスタンスを使い回す。毎回 new すると前のポップアップが残り複数表示になる。
+const popup = new maplibregl.Popup({ closeButton: true, maxWidth: '300px' })
+let popupFeats: Feat[] = []
+let popupIdx = 0
+
+function closePopup(): void {
+  popupFeats = []
+  popupIdx = 0
+  popup.remove()
+}
+
+function renderPopup(): void {
+  const f = popupFeats[popupIdx]
+  if (!f) return
   const key = keyFromLayer(f.layer.id)
-  popup
-    .setLngLat(e.lngLat)
-    .setHTML(popupHtml(key, f.properties as Record<string, unknown>))
-    .addTo(map)
+  const props = f.properties as Record<string, unknown>
+  const nav =
+    popupFeats.length > 1
+      ? `<div class="pp-nav">` +
+        `<button type="button" class="pp-nav-btn" data-nav="prev" aria-label="前のフィーチャ">‹</button>` +
+        `<span class="pp-nav-count">${popupIdx + 1} / ${popupFeats.length}<span class="pp-nav-kind">${defOf(key)?.label ?? key}</span></span>` +
+        `<button type="button" class="pp-nav-btn" data-nav="next" aria-label="次のフィーチャ">›</button>` +
+        `</div>`
+      : ''
+  popup.setHTML(nav + popupHtml(key, props))
+
+  const el = popup.getElement()
+  for (const btn of el?.querySelectorAll<HTMLButtonElement>('[data-nav]') ?? []) {
+    btn.addEventListener('click', () => {
+      const step = btn.dataset.nav === 'next' ? 1 : -1
+      popupIdx = (popupIdx + step + popupFeats.length) % popupFeats.length
+      renderPopup()
+    })
+  }
+}
+
+map.on('click', (e) => {
+  const feats = queryAt(e.point)
+  if (!feats.length) {
+    closePopup()
+    return
+  }
+  popupFeats = feats
+  popupIdx = 0
+  popup.setLngLat(e.lngLat).addTo(map)
+  renderPopup()
+  // タッチ端末はホバーが無いので、タップ時に何を選んだかを地図側でも示す
+  if (!CAN_HOVER) setHover(feats[0])
 })
+popup.on('close', () => {
+  popupFeats = []
+  if (!CAN_HOVER) clearHover()
+})
+map.on('touchstart', hideTooltip)
 
 // ---- 初期化 ----
 renderThemeBtn()
+initCollapsed()
 renderCollapseBtn()
 buildYearSeg()
 buildToggles()

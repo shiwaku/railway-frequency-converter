@@ -8,6 +8,9 @@
 <body>
   <div id="map"></div>
   <div id="tooltip" class="map-tooltip" hidden></div>
+  <div id="loading" class="map-loading" role="status" aria-live="polite" hidden>
+    <span class="spinner" aria-hidden="true"></span>読み込み中…
+  </div>
 
   <section id="panel" class="panel" aria-label="コントロールパネル">
     <header class="panel-head">
@@ -17,7 +20,7 @@
       </div>
       <div class="head-actions">
         <button id="theme-btn" class="icon-btn" type="button" title="テーマ切替" aria-label="テーマ切替"></button>
-        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉"></button>
+        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉" aria-controls="panel-body" aria-expanded="true"></button>
       </div>
     </header>
 

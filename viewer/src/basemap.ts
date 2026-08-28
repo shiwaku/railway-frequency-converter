@@ -86,8 +86,13 @@ function buildDarkStyle(): StyleSpecification {
 
 let darkStyleCache: StyleSpecification | null = null
 
+/**
+ * 毎回コピーを返す。map.setStyle() に渡したオブジェクトは MapLibre 側で
+ * stylesheet として保持され、addLayer/addSource がそこへ書き込むので、
+ * 同じオブジェクトを使い回すとテーマを往復するたびにデータレイヤーが混入する。
+ */
 export function getBasemapStyle(theme: Theme): StyleSpecification {
-  if (theme === 'light') return paleStyle as StyleSpecification
+  if (theme === 'light') return structuredClone(paleStyle) as StyleSpecification
   if (!darkStyleCache) darkStyleCache = buildDarkStyle()
-  return darkStyleCache
+  return structuredClone(darkStyleCache)
 }
