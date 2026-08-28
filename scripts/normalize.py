@@ -8,8 +8,14 @@
   3. 運行本数プロパティの年サフィックスが不揃い
      (2023 ファイル=…2023、2024/2025/2026 ファイル=…2024) なので、
      "順方向運行本数YYYY"/"逆方向運行本数YYYY" を検出し、
-     年に依存しない安定キー honsu_fwd / honsu_rev / honsu_total と
-     元ラベルの年 count_year を付与する（元プロパティは保持）。
+     年に依存しない安定キー honsu_fwd / honsu_rev / honsu_total を付与する
+     （元プロパティは保持）。
+
+     ⚠ サフィックスの年は集計年ではない。gtfs-gis.jp は「本数を数える作業を
+     行った年 = 版年（ファイル名の年）」を集計年としており、2025/2026 版でも
+     列名だけ …2024 のまま据え置かれている（実データは版ごとに更新され、
+     共通区間の約半数で値が異なることを確認済み）。したがって集計年 count_year
+     には**サフィックスの年ではなく版年（data_year）**を採用する。
 """
 from __future__ import annotations
 
@@ -53,19 +59,16 @@ def _to_int(value):
         return None
 
 
-def add_stable_honsu(props: dict) -> None:
+def add_stable_honsu(props: dict, year: int) -> None:
     fwd = rev = None
-    count_year = None
     for key, value in list(props.items()):
         m = FWD_RE.match(key)
         if m:
             fwd = _to_int(value)
-            count_year = int(m.group(1))
             continue
         m = REV_RE.match(key)
         if m:
             rev = _to_int(value)
-            count_year = int(m.group(1))
     if fwd is None and rev is None:
         return  # 本数プロパティを持たないデータセット（駅点データ等）
     if fwd is not None:
@@ -74,8 +77,9 @@ def add_stable_honsu(props: dict) -> None:
         props["honsu_rev"] = rev
     if fwd is not None or rev is not None:
         props["honsu_total"] = (fwd or 0) + (rev or 0)
-    if count_year is not None:
-        props["count_year"] = count_year
+    # 集計年 = 版年（ファイル名の年）。元列名のサフィックス年は当てにならない
+    # （2025/2026 版でも …2024 のまま）ため使わない。→ docstring 参照
+    props["count_year"] = year
 
 
 def normalize_file(src, dest, year: int) -> tuple[int, set[str]]:
@@ -91,7 +95,7 @@ def normalize_file(src, dest, year: int) -> tuple[int, set[str]]:
             geom_types.add(geom["type"])
         props = feat.setdefault("properties", {})
         props["data_year"] = year
-        add_stable_honsu(props)
+        add_stable_honsu(props, year)
 
     with dest.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)

@@ -141,11 +141,16 @@ function hassakuTotal(key: string, p: Record<string, unknown>): number {
 
 export function hoverHtml(key: string, p: Record<string, unknown>): string {
   const g = (k: string): string => String(p[k] ?? '')
-  if (key === 'rosen_kukan' || key === 'kukan') {
-    return `<b>${g('路線名')}</b> ｜ 計 ${g('honsu_total')}本`
+  if (key === 'kukan') {
+    // 区間別: 同一区間を走る全路線・全事業者の列車を合算した本数
+    return `<b>${g('路線名')} 区間</b> ｜ 全列車計 ${g('honsu_total')}本/日`
+  }
+  if (key === 'rosen_kukan') {
+    return `<b>${g('路線名')}</b> ｜ 計 ${g('honsu_total')}本/日`
   }
   if (key === 'eki' || key === 'rosen_eki') {
-    return `<b>${g('駅名')}</b> ｜ 発着 ${hassakuTotal(key, p)}本`
+    // 発着計 = 発本数 + 着本数（列車1本が発・着で2回計上されうる）
+    return `<b>${g('駅名')}</b> ｜ 発着計 ${hassakuTotal(key, p)}本/日`
   }
   return `<b>${g('EkiName')}</b>`
 }
@@ -153,14 +158,20 @@ export function hoverHtml(key: string, p: Record<string, unknown>): string {
 export function popupHtml(key: string, p: Record<string, unknown>): string {
   const g = (k: string): string => String(p[k] ?? '')
   if (key === 'rosen_kukan' || key === 'kukan') {
+    const isKukan = key === 'kukan'
+    const title = isKukan ? `${g('路線名')} 区間` : g('路線名')
+    const note = isKukan
+      ? `<div class="pp-note">この区間を走る全路線・全事業者の列車を合算した本数</div>`
+      : ''
     return (
-      `<div class="pp-title">${g('路線名')}</div>` +
+      `<div class="pp-title">${title}</div>` +
       `<div class="pp-sub">${g('起点駅')} → ${g('終点駅')}</div>` +
+      note +
       `<dl class="pp-dl">` +
-      `<dt>順方向</dt><dd>${g('honsu_fwd')}</dd>` +
-      `<dt>逆方向</dt><dd>${g('honsu_rev')}</dd>` +
-      `<dt>合計</dt><dd class="pp-strong">${g('honsu_total')}</dd>` +
-      `</dl><div class="pp-foot">${g('count_year')}年集計 ｜ ${g('事業者名')}</div>`
+      `<dt>順方向</dt><dd>${g('honsu_fwd')}本/日</dd>` +
+      `<dt>逆方向</dt><dd>${g('honsu_rev')}本/日</dd>` +
+      `<dt>合計</dt><dd class="pp-strong">${g('honsu_total')}本/日</dd>` +
+      `</dl><div class="pp-foot">${g('count_year')}年版（平日）${isKukan ? '' : ` ｜ ${g('事業者名')}`}</div>`
     )
   }
   if (key === 'eki') {
@@ -172,14 +183,16 @@ export function popupHtml(key: string, p: Record<string, unknown>): string {
       `<dt>方向1発着</dt><dd>${g('方向１発着計')}</dd>` +
       `<dt>方向2発着</dt><dd>${g('方向２発着計')}</dd>` +
       `<dt>乗入路線数</dt><dd>${g('路線数')}</dd>` +
-      `</dl>`
+      `</dl>` +
+      `<div class="pp-foot">発着計＝発本数＋着本数（平日1日）</div>`
     )
   }
   if (key === 'rosen_eki') {
     return (
       `<div class="pp-title">${g('駅名')}</div>` +
       `<div class="pp-sub">${g('路線名')} ｜ ${g('事業者名')}</div>` +
-      `<dl class="pp-dl"><dt>着発計</dt><dd class="pp-strong">${hassakuTotal(key, p)}</dd></dl>`
+      `<dl class="pp-dl"><dt>発着計</dt><dd class="pp-strong">${hassakuTotal(key, p)}</dd></dl>` +
+      `<div class="pp-foot">発着計＝発本数＋着本数（平日1日）</div>`
     )
   }
   return `<div class="pp-title">${g('EkiName')}</div><div class="pp-sub">${g('RName')}</div>`
