@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>鉄道運行本数 マップ</title>
+  <script type="module" crossorigin src="./assets/index-C8I81FLM.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-iKTYvbsf.css">
+</head>
+<body>
+  <div id="map"></div>
+  <div id="tooltip" class="map-tooltip" hidden></div>
+  <div id="loading" class="map-loading" role="status" aria-live="polite" hidden>
+    <span class="spinner" aria-hidden="true"></span>読み込み中…
+  </div>
+
+  <section id="panel" class="panel" aria-label="コントロールパネル">
+    <header class="panel-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🚆</span>
+        <h1>鉄道運行本数</h1>
+      </div>
+      <div class="head-actions">
+        <button id="theme-btn" class="icon-btn" type="button" title="テーマ切替" aria-label="テーマ切替"></button>
+        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉" aria-controls="panel-body" aria-expanded="true"></button>
+      </div>
+    </header>
+
+    <div id="panel-body" class="panel-body">
+      <div class="field">
+        <label class="field-label" for="year">年次</label>
+        <div class="seg" id="year-seg" role="tablist" aria-label="年次選択"></div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">レイヤー</span>
+        <div id="layers" class="toggles"></div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">事業者種別<span class="field-hint">色相で区別</span></span>
+        <div id="categories" class="toggles"></div>
+        <p id="cat-note" class="field-note" hidden></p>
+      </div>
+
+      <div class="field">
+        <span class="field-label">凡例</span>
+        <div id="legend" class="legend"></div>
+      </div>
+
+      <footer class="panel-foot">
+        データ: 鉄道運行本数 CC-BY 4.0 / ODbL（gtfs-gis.jp）<br />
+        背景: 国土地理院 最適化ベクトルタイル
+      </footer>
+    </div>
+  </section>
+
+</body>
+</html>
