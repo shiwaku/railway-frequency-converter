@@ -4,12 +4,16 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 
 import { getBasemapStyle } from './basemap'
 import {
+  CATEGORIES,
+  type Category,
   LAYERS,
   type LayerDef,
+  categoryFilter,
   hoverHtml,
   paintFor,
   popupHtml,
   rampColors,
+  stopsFor,
 } from './layers'
 import { applyThemeAttr, initialTheme, type Theme } from './theme'
 import './style.css'
@@ -93,10 +97,12 @@ function addDataLayers(): void {
       type: p.type,
       source: def.key,
       'source-layer': def.key,
-      layout: { visibility: def.on ? 'visible' : 'none' },
+      // sort-key / line-cap は layout 側なので paintFor の layout を引き継ぐ
+      layout: { ...(p.layout ?? {}), visibility: def.on ? 'visible' : 'none' },
       paint: p.paint,
     } as maplibregl.LayerSpecification)
   }
+  applyCategoryFilters()
   beginLoading()
 }
 
@@ -142,7 +148,7 @@ function setTheme(next: Theme): void {
   map.once('style.load', () => {
     addDataLayers()
     renderLegend()
-    renderToggleDots()
+    renderCategoryChips()
   })
 }
 themeBtn.addEventListener('click', () => setTheme(theme === 'dark' ? 'light' : 'dark'))
@@ -187,12 +193,6 @@ function buildYearSeg(): void {
 
 // ---- レイヤートグル（線＝排他ラジオ / 点＝チェックボックス） ----
 const layersDiv = document.getElementById('layers') as HTMLElement
-const dotFor = (def: LayerDef): string => {
-  if (!def.valueMax && def.geom === 'point') return theme === 'dark' ? '#9aa0a6' : '#5f6368'
-  const { colors } = rampColors(def.geom, theme)
-  return colors[colors.length - 2]
-}
-
 function setLayerVisible(def: LayerDef, on: boolean): void {
   def.on = on
   const id = layerId(def.key)
@@ -216,13 +216,9 @@ function toggleRow(def: LayerDef | null, kind: 'radio' | 'checkbox', name?: stri
   text.className = 't-label'
   text.textContent = def ? def.label : '非表示'
 
+  // 色は種別（下の「事業者種別」）が持つので、レイヤー行には色見本を置かない。
+  // 全データセットで同じ色になり、情報を持たないドットは目印にならない。
   label.append(input, mark, text)
-  if (def) {
-    const dot = document.createElement('span')
-    dot.className = 't-dot'
-    dot.style.background = dotFor(def)
-    label.append(dot)
-  }
 
   input.addEventListener('change', () => {
     if (kind === 'radio') {
@@ -234,6 +230,7 @@ function toggleRow(def: LayerDef | null, kind: 'radio' | 'checkbox', name?: stri
       setLayerVisible(def, input.checked)
     }
     renderLegend()
+    renderCategoryNote()
   })
   return label
 }
@@ -263,46 +260,136 @@ function buildToggles(): void {
   )
 }
 
-function renderToggleDots(): void {
-  for (const def of LAYERS) {
-    const dot = layersDiv.querySelector<HTMLElement>(`.toggle[data-key="${def.key}"] .t-dot`)
-    if (dot) dot.style.background = dotFor(def)
+// ---- 事業者種別フィルタ ----
+// 5 種別は色相で見分けるが、色相だけの区別は重なった路線や小さい円では読み取りにくく、
+// 色覚特性によっては赤(路面電車)と緑(中小私鉄)が近づく。ここで種別を絞り込めることが
+// その実務的な回避手段になる。
+const catsDiv = document.getElementById('categories') as HTMLElement
+const catNote = document.getElementById('cat-note') as HTMLElement
+const enabledCats = new Set<Category>(CATEGORIES.map((c) => c.key))
+
+/** 種別チップはその種別のランプをそのまま縮めたもの。色相＝種別、明度＝本数 が一目で分かる。 */
+const catChipStyle = (c: Category): string =>
+  `background:linear-gradient(90deg,${rampColors(c, theme).join(',')})`
+
+function buildCategories(): void {
+  for (const c of CATEGORIES) {
+    const label = document.createElement('label')
+    label.className = 'toggle'
+    label.dataset.cat = c.key
+
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.checked = true
+    const mark = document.createElement('span')
+    mark.className = 'switch'
+    const text = document.createElement('span')
+    text.className = 't-label'
+    text.textContent = c.label
+    const chip = document.createElement('span')
+    chip.className = 't-chip'
+    chip.setAttribute('style', catChipStyle(c.key))
+
+    label.append(input, mark, text, chip)
+    input.addEventListener('change', () => {
+      if (input.checked) enabledCats.add(c.key)
+      else enabledCats.delete(c.key)
+      applyCategoryFilters()
+    })
+    catsDiv.append(label)
   }
+}
+
+function renderCategoryChips(): void {
+  for (const c of CATEGORIES) {
+    const chip = catsDiv.querySelector<HTMLElement>(`.toggle[data-cat="${c.key}"] .t-chip`)
+    if (chip) chip.setAttribute('style', catChipStyle(c.key))
+  }
+}
+
+/** レイヤーを作り直すたび（年次・テーマ）に呼ぶ必要がある。 */
+function applyCategoryFilters(): void {
+  const enabled = [...enabledCats]
+  for (const def of LAYERS) {
+    const id = layerId(def.key)
+    if (!map.getLayer(id)) continue
+    const f = categoryFilter(def, enabled)
+    if (f) map.setFilter(id, f)
+  }
+  renderCategoryNote()
+  clearHover()
+}
+
+/** 種別を持てないレイヤーが表示中なら、フィルタが効かないことを明示する。 */
+function renderCategoryNote(): void {
+  const unsplit = LAYERS.filter((l) => l.on && !l.opProp)
+  if (!unsplit.length) {
+    catNote.hidden = true
+    return
+  }
+  catNote.hidden = false
+  catNote.textContent =
+    `${unsplit.map((l) => l.label).join('・')}は区間内の全事業者を合算した値のため、種別で分けられません。`
 }
 
 // ---- 凡例（表示中のレイヤーに連動） ----
 const legendDiv = document.getElementById('legend') as HTMLElement
-function legendBlock(title: string, geom: 'line' | 'point', note: string): string {
-  const { stops, colors } = rampColors(geom, theme)
-  const max = stops[stops.length - 1]
-  const gradient = colors
-    .map((c, i) => `${c} ${Math.round((stops[i] / max) * 100)}%`)
-    .join(', ')
-  const ticks = stops
-    .map((s, i) => `<span>${s}${i === stops.length - 1 ? '+' : ''}</span>`)
+
+/**
+ * 目盛りは stops の実値位置に置く。等間隔に並べるとバーの色の切れ目とずれ、
+ * 分位ベースの区切り（左に密）では読み手を確実に誤らせる。
+ */
+function legendTicks(stops: number[]): string {
+  const top = stops[stops.length - 1]
+  return stops
+    .map((s, i) => {
+      const last = i === stops.length - 1
+      const pos =
+        i === 0
+          ? 'left:0'
+          : last
+            ? 'right:0'
+            : `left:${((s / top) * 100).toFixed(1)}%;transform:translateX(-50%)`
+      return `<span style="${pos}">${s}${last ? '+' : ''}</span>`
+    })
     .join('')
+}
+
+function legendBlock(def: LayerDef): string {
+  const stops = stopsFor(def)
+  // 数値スケールは無彩色 1 本で示す。OKLCH で L・C を全種別共通に固定しているので
+  // 「明度→本数」の対応は種別が変わっても同一で、色相ごとにバーを並べる必要がない。
+  const colors = rampColors(null, theme)
+  const top = stops[stops.length - 1]
+  const gradient = colors
+    .map((c, i) => `${c} ${((stops[i] / top) * 100).toFixed(1)}%`)
+    .join(', ')
+  const isLine = def.geom === 'line'
+  const title = `${isLine ? '線' : '点'}：${def.label}`
+  const canSplit = Boolean(def.opProp)
+  const encode = canSplit ? '明度が本数・色相が種別' : '明度が本数（種別なし）'
+  const note = isLine
+    ? `運行本数 本/日 ｜ ${encode}・太さも連動 ｜ 多い区間を下に描画`
+    : `発着計 本/日 ｜ ${encode}・円の面積も比例 ｜ 大きい円を下に描画`
   return (
     `<div class="legend-block">` +
     `<div class="legend-title">${title}</div>` +
     `<div class="legend-bar" style="background:linear-gradient(90deg,${gradient})"></div>` +
-    `<div class="legend-ticks">${ticks}</div>` +
+    `<div class="legend-ticks">${legendTicks(stops)}</div>` +
     `<div class="legend-note">${note}</div>` +
     `</div>`
   )
 }
+
 function renderLegend(): void {
-  const blocks: string[] = []
-  if (LAYERS.some((l) => l.on && l.geom === 'line')) {
-    blocks.push(legendBlock('線：運行本数（合計・本/日）', 'line', '色と太さの両方が本数に連動'))
-  }
-  if (LAYERS.some((l) => l.on && l.geom === 'point' && l.valueMax)) {
-    blocks.push(legendBlock('点：発着本数（本/日）', 'point', '円の面積が本数に比例'))
-  }
+  // 区切りはデータセットごとに違う（分布のレンジが 2〜4 倍違う）ので
+  // 表示中のデータセットぶんだけ凡例を出す。
+  const blocks = LAYERS.filter((l) => l.on && l.stops).map(legendBlock)
+  // kukan_eki は本数を持たないので明度に載せる値が無い。色相＝種別だけを示す。
   if (defOf('kukan_eki')?.on) {
-    const c = theme === 'dark' ? '#9aa0a6' : '#5f6368'
     blocks.push(
       `<div class="legend-block"><div class="legend-title">点：区間端の駅</div>` +
-        `<div class="legend-note"><span class="legend-dot" style="background:${c}"></span>本数データを持たない位置のみの点</div></div>`,
+        `<div class="legend-note">本数データを持たない位置のみの点 ｜ 色相が種別（明度は本数と無関係）</div></div>`,
     )
   }
   legendDiv.innerHTML =
@@ -477,5 +564,7 @@ initCollapsed()
 renderCollapseBtn()
 buildYearSeg()
 buildToggles()
+buildCategories()
+renderCategoryNote()
 renderLegend()
 map.on('load', addDataLayers)

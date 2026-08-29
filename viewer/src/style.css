@@ -143,11 +143,34 @@ body {
 }
 
 .field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-3);
+}
+
+.field-hint {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  opacity: 0.8;
+}
+
+.field-note {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+
+.field-note[hidden] {
+  display: none;
 }
 
 /* ---- 年次セグメント ---- */
@@ -307,9 +330,11 @@ body {
   font-size: 13px;
 }
 
-.toggle .t-dot {
+/* 種別チップ。単色ではなくその種別のランプを縮めて見せ、
+   「色相＝種別 / 明度＝本数」を凡例を読まなくても掴めるようにする。 */
+.toggle .t-chip {
   flex: none;
-  width: 10px;
+  width: 34px;
   height: 10px;
   border-radius: 3px;
   border: 1px solid var(--line-2);
@@ -338,12 +363,19 @@ body {
   border: 1px solid var(--line);
 }
 
+/* 目盛りは stops の実値位置（%）に置くので絶対配置。等間隔に並べるとバーの色とずれる。 */
 .legend-ticks {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 13px;
   font-size: 10px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+}
+
+.legend-ticks span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
 }
 
 .legend-note {
@@ -392,6 +424,16 @@ body {
 
 .map-tooltip.below {
   transform: translate(-50%, 14px);
+}
+
+/* ツールチップ先頭の種別バッジ。地図の色相が何かをその場で確かめる用。 */
+.tt-cat {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: rgba(127, 127, 127, 0.22);
 }
 
 .map-tooltip b {
