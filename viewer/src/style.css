@@ -357,25 +357,34 @@ body {
   color: var(--ink-2);
 }
 
-.legend-bar {
-  height: 10px;
-  border-radius: 5px;
-  border: 1px solid var(--line);
+/* 凡例の見本。地図と同じ実寸（z13 相当）の太さ・直径をそのまま描く。
+   本数は太さ／円の面積だけが表すので、色は種別に譲って無彩色にする。 */
+.legend-samples {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2px;
 }
 
-/* 目盛りは stops の実値位置（%）に置くので絶対配置。等間隔に並べるとバーの色とずれる。 */
-.legend-ticks {
-  position: relative;
-  height: 13px;
+.legend-sample {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.legend-sample i {
+  display: block;
+  background: var(--ink-3);
+  border-radius: 2px;
+}
+
+.legend-sample span {
   font-size: 10px;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
-}
-
-.legend-ticks span {
-  position: absolute;
-  top: 0;
-  white-space: nowrap;
 }
 
 .legend-note {

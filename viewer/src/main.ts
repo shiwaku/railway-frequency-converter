@@ -12,7 +12,8 @@ import {
   hoverHtml,
   paintFor,
   popupHtml,
-  rampColors,
+  categoryColor,
+  sampleSizes,
   stopsFor,
 } from './layers'
 import { applyThemeAttr, initialTheme, type Theme } from './theme'
@@ -268,9 +269,8 @@ const catsDiv = document.getElementById('categories') as HTMLElement
 const catNote = document.getElementById('cat-note') as HTMLElement
 const enabledCats = new Set<Category>(CATEGORIES.map((c) => c.key))
 
-/** 種別チップはその種別のランプをそのまま縮めたもの。色相＝種別、明度＝本数 が一目で分かる。 */
-const catChipStyle = (c: Category): string =>
-  `background:linear-gradient(90deg,${rampColors(c, theme).join(',')})`
+/** 種別チップは地図で使うのと同じ単色。 */
+const catChipStyle = (c: Category): string => `background:${categoryColor(c, theme)}`
 
 function buildCategories(): void {
   for (const c of CATEGORIES) {
@@ -336,46 +336,43 @@ function renderCategoryNote(): void {
 const legendDiv = document.getElementById('legend') as HTMLElement
 
 /**
- * 目盛りは stops の実値位置に置く。等間隔に並べるとバーの色の切れ目とずれ、
- * 分位ベースの区切り（左に密）では読み手を確実に誤らせる。
+ * 凡例は地図と同じ実寸の見本を並べる。
+ * 本数は太さ／円の面積だけが表すので、グラデーションのバーではなく
+ * 「その本数だと地図上でこの太さ・この大きさ」を直接見せたほうが早い。
+ * 色は種別が持つため見本は無彩色にする。
  */
-function legendTicks(stops: number[]): string {
-  const top = stops[stops.length - 1]
-  return stops
-    .map((s, i) => {
-      const last = i === stops.length - 1
-      const pos =
-        i === 0
-          ? 'left:0'
-          : last
-            ? 'right:0'
-            : `left:${((s / top) * 100).toFixed(1)}%;transform:translateX(-50%)`
-      return `<span style="${pos}">${s}${last ? '+' : ''}</span>`
-    })
-    .join('')
+function legendSamples(def: LayerDef): string {
+  const stops = stopsFor(def)
+  const sizes = sampleSizes(def)
+  const isLine = def.geom === 'line'
+  const box = Math.max(...sizes) * 2 + 2
+  const items = stops.map((v, i) => {
+    const last = i === stops.length - 1
+    const mark = isLine
+      ? `<i style="width:22px;height:${sizes[i].toFixed(1)}px"></i>`
+      : `<i style="width:${(sizes[i] * 2).toFixed(1)}px;height:${(sizes[i] * 2).toFixed(1)}px;border-radius:50%"></i>`
+    return (
+      `<div class="legend-sample" style="min-height:${box.toFixed(0)}px">` +
+      mark +
+      `<span>${v}${last ? '+' : ''}</span>` +
+      `</div>`
+    )
+  })
+  return `<div class="legend-samples">${items.join('')}</div>`
 }
 
 function legendBlock(def: LayerDef): string {
-  const stops = stopsFor(def)
-  // 数値スケールは無彩色 1 本で示す。OKLCH で L・C を全種別共通に固定しているので
-  // 「明度→本数」の対応は種別が変わっても同一で、色相ごとにバーを並べる必要がない。
-  const colors = rampColors(null, theme)
-  const top = stops[stops.length - 1]
-  const gradient = colors
-    .map((c, i) => `${c} ${((stops[i] / top) * 100).toFixed(1)}%`)
-    .join(', ')
   const isLine = def.geom === 'line'
   const title = `${isLine ? '線' : '点'}：${def.label}`
   const canSplit = Boolean(def.opProp)
-  const encode = canSplit ? '明度が本数・色相が種別' : '明度が本数（種別なし）'
+  const hue = canSplit ? '色は種別' : '色は種別なし'
   const note = isLine
-    ? `運行本数 本/日 ｜ ${encode}・太さも連動 ｜ 多い区間を下に描画`
-    : `発着計 本/日 ｜ ${encode}・円の面積も比例 ｜ 大きい円を下に描画`
+    ? `運行本数 本/日 ｜ 線の太さが本数・${hue} ｜ 多い区間を下に描画`
+    : `発着計 本/日 ｜ 円の面積が本数に比例・${hue} ｜ 大きい円を下に描画`
   return (
     `<div class="legend-block">` +
     `<div class="legend-title">${title}</div>` +
-    `<div class="legend-bar" style="background:linear-gradient(90deg,${gradient})"></div>` +
-    `<div class="legend-ticks">${legendTicks(stops)}</div>` +
+    legendSamples(def) +
     `<div class="legend-note">${note}</div>` +
     `</div>`
   )
@@ -389,7 +386,7 @@ function renderLegend(): void {
   if (defOf('kukan_eki')?.on) {
     blocks.push(
       `<div class="legend-block"><div class="legend-title">点：区間端の駅</div>` +
-        `<div class="legend-note">本数データを持たない位置のみの点 ｜ 色相が種別（明度は本数と無関係）</div></div>`,
+        `<div class="legend-note">本数データを持たない位置のみの点 ｜ 大きさは一定、色は種別</div></div>`,
     )
   }
   legendDiv.innerHTML =
