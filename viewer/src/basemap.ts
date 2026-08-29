@@ -54,37 +54,68 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [Math.round(hue(h + 1 / 3) * 255), Math.round(hue(h) * 255), Math.round(hue(h - 1 / 3) * 255)]
 }
 
-/** 明度を反転して暗色に変換（色相は保持、彩度は少し抑える）。 */
-function darkenColor(str: string): string {
+/**
+ * 基図の彩度をここまで落とす。
+ *
+ * 地理院淡色は高速道路＝緑、国道＝黄/橙 と、データレイヤーの種別色と同じ色相空間を使う。
+ * そのままだと「緑の線」が中小私鉄なのか高速道路なのか判別できない。
+ * 基図から色相を取り上げてデータ専用にすることで、種別の色がどれだけ弱くても読めるようになる。
+ * 0 にすると海と陸の区別まで失うので、わずかに色味を残す。
+ */
+const BASEMAP_SATURATION = 0.2
+
+/**
+ * 水域だけは彩度を多めに残す。ここの青は「道路の種別」のような凡例的な色ではなく
+ * 陸と海を見分けるための色で、データレイヤーのどの種別色とも競合しない。
+ * 全部グレーにすると日本地図として海岸線が読みにくくなる。
+ */
+const WATER_SATURATION = 0.55
+const WATER_LAYER = /水|海|川|^background$/
+
+/** 彩度だけ落とす（色相・明度は保持）。ライトテーマ用。 */
+function muteColor(str: string, keep: number): string {
+  const c = parseColor(str)
+  if (!c) return str
+  const [r, g, b, a] = c
+  const [h, s, l] = rgbToHsl(r, g, b)
+  const [nr, ng, nb] = hslToRgb(h, s * keep, l)
+  return `rgba(${nr},${ng},${nb},${a})`
+}
+
+/** 明度を反転して暗色に変換（色相は保持、彩度は落とす）。ダークテーマ用。 */
+function darkenColor(str: string, keep: number): string {
   const c = parseColor(str)
   if (!c) return str
   const [r, g, b, a] = c
   const [h, s, l] = rgbToHsl(r, g, b)
   const nl = Math.min(0.9, Math.max(0.05, 1 - l))
-  const [nr, ng, nb] = hslToRgb(h, s * 0.85, nl)
+  const [nr, ng, nb] = hslToRgb(h, s * keep, nl)
   return `rgba(${nr},${ng},${nb},${a})`
 }
 
 /** paint 値（文字列 or 式配列）の中の色文字列だけを再帰的に変換する。 */
-function transformValue(v: unknown): unknown {
-  if (typeof v === 'string') return parseColor(v) ? darkenColor(v) : v
-  if (Array.isArray(v)) return v.map(transformValue)
+function transformValue(v: unknown, fn: (c: string) => string): unknown {
+  if (typeof v === 'string') return parseColor(v) ? fn(v) : v
+  if (Array.isArray(v)) return v.map((x) => transformValue(x, fn))
   return v
 }
 
-function buildDarkStyle(): StyleSpecification {
+function buildStyle(theme: Theme): StyleSpecification {
+  const base = theme === 'dark' ? darkenColor : muteColor
   const style = structuredClone(paleStyle) as StyleSpecification
   for (const layer of style.layers) {
     const paint = (layer as { paint?: Record<string, unknown> }).paint
     if (!paint) continue
+    const keep = WATER_LAYER.test(layer.id) ? WATER_SATURATION : BASEMAP_SATURATION
+    const fn = (c: string): string => base(c, keep)
     for (const key of Object.keys(paint)) {
-      if (key.includes('color')) paint[key] = transformValue(paint[key])
+      if (key.includes('color')) paint[key] = transformValue(paint[key], fn)
     }
   }
   return style
 }
 
-let darkStyleCache: StyleSpecification | null = null
+const styleCache: Record<Theme, StyleSpecification | null> = { light: null, dark: null }
 
 /**
  * 毎回コピーを返す。map.setStyle() に渡したオブジェクトは MapLibre 側で
@@ -92,7 +123,6 @@ let darkStyleCache: StyleSpecification | null = null
  * 同じオブジェクトを使い回すとテーマを往復するたびにデータレイヤーが混入する。
  */
 export function getBasemapStyle(theme: Theme): StyleSpecification {
-  if (theme === 'light') return structuredClone(paleStyle) as StyleSpecification
-  if (!darkStyleCache) darkStyleCache = buildDarkStyle()
-  return structuredClone(darkStyleCache)
+  if (!styleCache[theme]) styleCache[theme] = buildStyle(theme)
+  return structuredClone(styleCache[theme] as StyleSpecification)
 }
