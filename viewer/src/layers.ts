@@ -65,18 +65,26 @@ export type Category = 'jr' | 'major' | 'local' | 'newtransit' | 'tram'
 export interface CategoryDef {
   key: Category
   label: string
-  /** ランプの色相（HSL の H）。種別＝色相、運行本数＝明度＋太さ で二重符号化する。 */
+  /** OKLCH の色相角。 */
   hue: number
+  /**
+   * OKLCH の明度。明度は本数を表さない（本数は線の太さ・円の面積が担う）ので、
+   * **各色相が最も鮮やかに見える明度を個別に選べる**。
+   * sRGB で取れる彩度の上限は色相ごとに全く違い、黄は L≈0.8 付近、
+   * 青は L≈0.55 付近が最大になる。共通の L に揃えると黄が必ず濁る。
+   */
+  light: number
+  dark: number
 }
 
-// 色相は OKLCH の角度。5 種別が互いに最も離れる組み合わせを選んだ（最小 60 度）。
-// 青 / オーキッド / 緑 / マスタード / テラコッタ。
+// 色相は 5 種別が互いに最も離れる組み合わせ（最小 60 度）。
+// 青 / オーキッド / 緑 / ゴールド / レッド。
 export const CATEGORIES: CategoryDef[] = [
-  { key: 'jr', label: 'JR', hue: 258 },
-  { key: 'major', label: '大手私鉄・地下鉄', hue: 320 },
-  { key: 'local', label: '中小私鉄・三セク', hue: 155 },
-  { key: 'newtransit', label: 'モノレール・新交通', hue: 95 },
-  { key: 'tram', label: '路面電車', hue: 30 },
+  { key: 'jr', label: 'JR', hue: 258, light: 0.55, dark: 0.68 },
+  { key: 'major', label: '大手私鉄・地下鉄', hue: 320, light: 0.55, dark: 0.68 },
+  { key: 'local', label: '中小私鉄・三セク', hue: 155, light: 0.58, dark: 0.7 },
+  { key: 'newtransit', label: 'モノレール・新交通', hue: 95, light: 0.74, dark: 0.82 },
+  { key: 'tram', label: '路面電車', hue: 30, light: 0.58, dark: 0.68 },
 ]
 
 /**
@@ -158,36 +166,21 @@ export function categoryExpr(def: LayerDef): ExpressionSpecification | null {
   ] as ExpressionSpecification
 }
 
-// ---- 色ランプ（OKLCH）----
-// 種別＝色相 H / 運行本数＝明度 L の二重符号化。L と C は全種別で共通に固定するので、
-// 「同じ本数のフィーチャは種別が違っても同じ明るさに見える」が成り立つ。
-// この不変性のおかげで、凡例の数値スケールは無彩色バー 1 本で足りる（色相キーは
-// 種別フィルタのチップが兼ねる）。25 個の色見本を並べる必要がない。
-//   light: 背景が明るい → 高い値 = 暗い
-//   dark : 背景が暗い   → 高い値 = 明るい
-// C（彩度）は両端で落とす。明るすぎ・暗すぎる色は高彩度を保てず色域外に出るため。
+// ---- 種別の色 ----
+// **運行本数は線の太さ・円の面積だけで表す。色は種別だけを表す（単色）。**
+// 以前は明度にも本数を載せていたが、薄い段はどの種別もパステルに、濃い段はどれも
+// 黒に収束して色相が死んでいた。明度を手放したことで各色相を最も鮮やかな明度に
+// 置けるようになり、種別の見分けと本数の読み取りが互いを邪魔しなくなる。
 
-// 明度レンジは意図的に狭い。両端まで振ると最も薄い段はどの種別もパステルに、
-// 最も濃い段はどれも黒に収束して**色相が死ぬ**。本数の大小は太さ・円の面積が
-// 併せて担っているので、明度は種別が読める範囲に収めたほうが地図全体としては読みやすい。
-// C は各段で取れるだけ高くする（色域外は color.ts が色相を保ったまま彩度だけ縮める）。
-const LIGHT_L = [0.8, 0.715, 0.63, 0.53, 0.42]
-const LIGHT_C = [0.09, 0.125, 0.155, 0.16, 0.145]
-const DARK_L = [0.46, 0.56, 0.66, 0.755, 0.85]
-const DARK_C = [0.115, 0.145, 0.155, 0.135, 0.1]
+/** 彩度。sRGB の色域外は color.ts が色相を保ったまま彩度だけ縮める。 */
+const CHROMA = 0.2
 
-/** 種別を持てない `kukan` と、凡例の数値スケール用の無彩色ランプ。 */
-const NEUTRAL_HUE = 250
-
-export function rampColors(cat: Category | null, theme: Theme): string[] {
-  const ls = theme === 'dark' ? DARK_L : LIGHT_L
-  const cs = theme === 'dark' ? DARK_C : LIGHT_C
+export function categoryColor(cat: Category | null, theme: Theme): string {
   const def = cat ? CATEGORIES.find((c) => c.key === cat) : undefined
-  const hue = def?.hue ?? NEUTRAL_HUE
-  // 種別なしは彩度をほぼ落とす。どれか 1 種別の色を流用すると
-  // 「その種別の値」に見えてしまうため。
-  const scale = def ? 1 : 0.08
-  return ls.map((l, i) => oklch(l, cs[i] * scale, hue))
+  // 種別を持てない kukan は無彩色。どれか 1 種別の色を流用すると
+  // 「その種別の値」に見えてしまう。
+  if (!def) return oklch(theme === 'dark' ? 0.68 : 0.55, 0.012, 250)
+  return oklch(theme === 'dark' ? def.dark : def.light, CHROMA, def.hue)
 }
 
 /** 凡例と地図で同じ区切りを使うため公開する。 */
@@ -197,27 +190,19 @@ export function stopsFor(def: LayerDef): number[] {
 
 /**
  * ホバー強調色。5 種別が色相を使い切っているので、どの色相とも衝突しない
- * **無彩色の最大コントラスト**を当てる（明度だけは本数と同じ軸に乗るが、
- * 彩度 0 と 1.8 倍の線幅で「強調」だと読める）。
+ * 無彩色の最大コントラストを当てる（線幅 1.8 倍と併用）。
  */
 const HOVER_COLOR = { light: '#101418', dark: '#ffffff' } as const
 
 /** 本数を持たないデータセット（kukan_eki）の色。 */
 export const PLAIN_COLOR = { light: '#5f6368', dark: '#9aa0a6' } as const
 
-function colorExpr(def: LayerDef, input: ExpressionSpecification, theme: Theme): ExpressionSpecification {
-  const stops = stopsFor(def)
+function colorExpr(def: LayerDef, theme: Theme): ExpressionSpecification | string {
   const cat = categoryExpr(def)
-  const rampAt = (c: Category | null): ExpressionSpecification => {
-    const colors = rampColors(c, theme)
-    const pairs: (number | string)[] = []
-    stops.forEach((s, i) => pairs.push(s, colors[i]))
-    return ['interpolate', ['linear'], input, ...pairs] as ExpressionSpecification
-  }
-  if (!cat) return rampAt(null)
+  if (!cat) return categoryColor(null, theme)
   const cases: unknown[] = ['match', cat]
-  for (const c of CATEGORIES) cases.push(c.key, rampAt(c.key))
-  cases.push(rampAt('local')) // 既定
+  for (const c of CATEGORIES) cases.push(c.key, categoryColor(c.key, theme))
+  cases.push(categoryColor('local', theme)) // 既定
   return cases as ExpressionSpecification
 }
 
@@ -276,6 +261,16 @@ function radiusStops(stops: number[], rMin: number, rMax: number): number[] {
  * MapLibre は 1 つの式に zoom ベースの interpolate を 1 つしか許さないので、
  * ズーム補間を必ず最外側に置き、ホバー時の拡大は各ズームストップの内側で分岐させる。
  */
+// 本数を担う唯一のチャンネルになったので、以前より広いレンジを取る。
+// 低ズームでは全国 9,400 駅ぶんの円が並ぶため、広域では小さく抑えて拡大に従い伸ばす。
+// 末尾（z13）の値は凡例の見本と共有する。
+const PT_RADIUS_ZOOMS: [number, number, number][] = [
+  [6, 0.6, 2.4],
+  [9, 1.1, 4.8],
+  [11, 1.8, 7.6],
+  [13, 2.4, 12],
+]
+
 const ptRadius = (
   expr: ExpressionSpecification,
   stops: number[],
@@ -285,14 +280,9 @@ const ptRadius = (
     ['interpolate', ['linear'], expr, ...radiusStops(stops, rMin * s, rMax * s)] as ExpressionSpecification
   const stop = (rMin: number, rMax: number): ExpressionSpecification =>
     ['case', isHovered, at(rMin, rMax, hoverScale), at(rMin, rMax, 1)] as ExpressionSpecification
-  // 低ズームでは全国 9,400 駅ぶんの円が並ぶ。ここを大きくすると円の塊で
-  // 線レイヤーが埋もれるので、広域では小さく、拡大に従って伸ばす。
-  return ['interpolate', ['linear'], ['zoom'],
-    6, stop(0.7, 2.2),
-    9, stop(1.2, 4.2),
-    11, stop(1.9, 6.6),
-    13, stop(2.6, 10),
-  ] as ExpressionSpecification
+  const pairs: unknown[] = []
+  for (const [z, rMin, rMax] of PT_RADIUS_ZOOMS) pairs.push(z, stop(rMin, rMax))
+  return ['interpolate', ['linear'], ['zoom'], ...pairs] as ExpressionSpecification
 }
 
 /**
@@ -301,6 +291,13 @@ const ptRadius = (
  * 色と同じ区切り（stops）に載せるので、凡例の目盛りが太さにも対応する。
  */
 const WIDTH_FRACTIONS = [0, 0.24, 0.5, 0.74, 1]
+
+// 末尾（z13）の値は凡例の見本と共有する。
+const LINE_WIDTH_ZOOMS: [number, number, number][] = [
+  [6, 0.7, 3.4],
+  [10, 1.4, 7],
+  [13, 2, 12],
+]
 
 const lineWidth = (stops: number[], hoverScale: number): ExpressionSpecification => {
   const at = (min: number, max: number, s: number): ExpressionSpecification => {
@@ -311,11 +308,26 @@ const lineWidth = (stops: number[], hoverScale: number): ExpressionSpecification
   // ズーム補間は最外側に 1 つだけ（ptRadius と同じ制約）
   const stop = (min: number, max: number): ExpressionSpecification =>
     ['case', isHovered, at(min, max, hoverScale), at(min, max, 1)] as ExpressionSpecification
-  return ['interpolate', ['linear'], ['zoom'],
-    6, stop(0.9, 2.8),
-    10, stop(1.7, 5.5),
-    13, stop(2.6, 9),
-  ] as ExpressionSpecification
+  const pairs: unknown[] = []
+  for (const [z, wMin, wMax] of LINE_WIDTH_ZOOMS) pairs.push(z, stop(wMin, wMax))
+  return ['interpolate', ['linear'], ['zoom'], ...pairs] as ExpressionSpecification
+}
+
+/**
+ * 凡例に出す見本の実寸（z13 相当・px）。
+ * 地図が使う定数をそのまま通すので、凡例と地図の見た目がずれない。
+ * 線は太さ、点は半径を返す。
+ */
+export function sampleSizes(def: LayerDef): number[] {
+  const stops = stopsFor(def)
+  if (!stops.length) return []
+  if (def.geom === 'line') {
+    const [, min, max] = LINE_WIDTH_ZOOMS[LINE_WIDTH_ZOOMS.length - 1]
+    return stops.map((_, i) => min + (max - min) * WIDTH_FRACTIONS[i])
+  }
+  const [, min, max] = PT_RADIUS_ZOOMS[PT_RADIUS_ZOOMS.length - 1]
+  const top = stops[stops.length - 1]
+  return stops.map((v) => Number((min + (max - min) * Math.sqrt(v / top)).toFixed(2)))
 }
 
 type LayerStyle =
@@ -330,7 +342,7 @@ export function paintFor(def: LayerDef, theme: Theme): LayerStyle {
   const stops = def.stops ?? []
 
   if (def.geom === 'line') {
-    const color = colorExpr(def, HONSU_TOTAL, theme)
+    const color = colorExpr(def, theme)
     return {
       type: 'line',
       layout: {
@@ -351,7 +363,7 @@ export function paintFor(def: LayerDef, theme: Theme): LayerStyle {
 
   const expr = valueExpr(def)
   if (expr) {
-    const color = colorExpr(def, expr, theme)
+    const color = colorExpr(def, theme)
     return {
       type: 'circle',
       layout: { 'circle-sort-key': sortKey(expr) },
@@ -373,14 +385,11 @@ export function paintFor(def: LayerDef, theme: Theme): LayerStyle {
   // kukan_eki: 本数も一意 ID も持たない → 位置のみの点（ハイライト無し）。
   // 明度に載せる値が無いので、種別の色相だけをランプ中位の 1 色で示す。
   const cat = categoryExpr(def)
-  const solid: unknown[] = ['match', cat as ExpressionSpecification]
-  for (const c of CATEGORIES) solid.push(c.key, rampColors(c.key, theme)[3])
-  solid.push(PLAIN_COLOR[theme])
   return {
     type: 'circle',
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 6, 1.5, 13, 4],
-      'circle-color': (cat ? solid : PLAIN_COLOR[theme]) as ExpressionSpecification,
+      'circle-color': (cat ? colorExpr(def, theme) : PLAIN_COLOR[theme]) as ExpressionSpecification,
       'circle-stroke-color': stroke,
       'circle-stroke-width': 0.6,
     },
